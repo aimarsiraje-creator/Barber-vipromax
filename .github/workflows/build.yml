@@ -1,4 +1,4 @@
-name: Build BARBER VIPROMAX apps
+name: Build BARBER VIPROMAX apps and website
 
 on:
   workflow_dispatch:
@@ -15,6 +15,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,31 +67,42 @@ jobs:
           name: BARBER VIPROMAX apps (build ${{ github.run_number }})
           files: barber_vipromax/out/*.apk
 
-      - name: Build web apps (install on iPhone and Android from a link)
-        continue-on-error: true
+      - name: Assemble the website (landing page + iPhone web apps + APK)
         working-directory: barber_vipromax
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          BASE="/${{ github.event.repository.name }}/"
-          (cd apps/customer && flutter build web --release --base-href "$BASE")
-          (cd apps/barber && flutter build web --release --base-href "${BASE}barber/")
-          mkdir -p site/barber
-          cp -r apps/customer/build/web/. site/
-          cp -r apps/barber/build/web/. site/barber/
+          rm -rf site && mkdir -p site
+          cp -r website/. site/
+          mkdir -p site/downloads
+          cp out/1-BarberVIPROMAX-Customer.apk site/downloads/BarberVIPROMAX.apk
+          sed -i "s|PUT_YOUR_SUPABASE_URL|${SUPABASE_URL}|; s|PUT_YOUR_SUPABASE_ANON_KEY|${SUPABASE_ANON_KEY}|" site/shared/config.js
+          SIZE=$(du -h site/downloads/BarberVIPROMAX.apk | cut -f1)
+          sed -i "s|apkSize: ''|apkSize: '${SIZE}B'|" site/config.js
+          pip install "qrcode[pil]"
+          python3 - <<'PY'
+          import os, qrcode
+          q = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=12, border=2)
+          q.add_data(os.environ['SITE_URL']); q.make(fit=True)
+          q.make_image(fill_color='#06201a', back_color='#f4ecd9').save('site/assets/qr.png')
+          PY
+          echo "Website URL: $SITE_URL"
+          echo "Customer web app: ${SITE_URL}app/"
+          echo "Barber web app: ${SITE_URL}barber/"
 
       - uses: actions/configure-pages@v5
-        continue-on-error: true
       - uses: actions/upload-pages-artifact@v3
-        continue-on-error: true
         with:
           path: barber_vipromax/site
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    continue-on-error: true
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+        
